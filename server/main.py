@@ -109,6 +109,8 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 HISTORY_DB_PATH = os.environ.get("HISTORY_DB_PATH", "/app/history/history.db")
 DEFAULT_LLM_MODEL = os.environ.get("MEM0_DEFAULT_LLM_MODEL", "gpt-4.1-nano-2025-04-14")
 DEFAULT_EMBEDDER_MODEL = os.environ.get("MEM0_DEFAULT_EMBEDDER_MODEL", "text-embedding-3-small")
+_embedder_dims_env = os.environ.get("MEM0_DEFAULT_EMBEDDER_DIMS")
+DEFAULT_EMBEDDER_DIMS = int(_embedder_dims_env) if _embedder_dims_env else None
 
 DEFAULT_CONFIG = {
     "version": "v1.1",
@@ -130,6 +132,10 @@ DEFAULT_CONFIG = {
     "embedder": {"provider": "openai", "config": {"api_key": OPENAI_API_KEY, "model": DEFAULT_EMBEDDER_MODEL}},
     "history_db_path": HISTORY_DB_PATH,
 }
+
+if DEFAULT_EMBEDDER_DIMS is not None:
+    DEFAULT_CONFIG["embedder"]["config"]["embedding_dims"] = DEFAULT_EMBEDDER_DIMS
+    DEFAULT_CONFIG["vector_store"]["config"]["embedding_model_dims"] = DEFAULT_EMBEDDER_DIMS
 
 
 set_session_factory(SessionLocal)
@@ -416,7 +422,14 @@ def get_memory(memory_id: str, _auth=Depends(verify_auth)):
 def search_memories(search_req: SearchRequest, _auth=Depends(verify_auth)):
     """Search for memories based on a query."""
     try:
-        params = {k: v for k, v in search_req.model_dump().items() if v is not None and k != "query"}
+        params = {k: v for k, v in search_req.model_dump().items() if v is not None and k not in {"query", "user_id", "agent_id", "run_id"}}
+        entity_filters = {
+            k: v
+            for k, v in {"user_id": search_req.user_id, "agent_id": search_req.agent_id, "run_id": search_req.run_id}.items()
+            if v is not None
+        }
+        if entity_filters:
+            params["filters"] = {**entity_filters, **(params.get("filters") or {})}
         return get_memory_instance().search(query=search_req.query, **params)
     except Exception:
         raise upstream_error()
